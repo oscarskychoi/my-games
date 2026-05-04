@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>착시 현상 - Forced Perspective Game</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        canvas { display: block; cursor: crosshair; }
+
+        #ui-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            pointer-events: none;
+            z-index: 10;
+            padding: 20px;
+        }
+
+        #info-panel {
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(10px);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 12px;
+            display: inline-block;
+            font-size: 14px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        #info-panel h2 {
+            font-size: 16px;
+            margin-bottom: 4px;
+            color: #7df;
+        }
+
+        #crosshair {
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 20;
+            font-size: 24px;
+            color: rgba(255,255,255,0.5);
+            text-shadow: 0 0 4px rgba(0,0,0,0.8);
+        }
+
+        #pickup-hint {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 16px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px 24px;
+            border-radius: 30px;
+            pointer-events: none;
+            z-index: 20;
+            opacity: 0;
+            transition: opacity 0.3s;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        #pickup-hint.visible { opacity: 1; }
+
+        #size-indicator {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #7df;
+            font-size: 20px;
+            font-weight: bold;
+            pointer-events: none;
+            z-index: 20;
+            opacity: 0;
+            transition: opacity 0.3s;
+            text-shadow: 0 0 10px rgba(100,200,255,0.5);
+        }
+
+        #size-indicator.visible { opacity: 1; }
+
+        #instructions {
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(20px);
+            color: white;
+            padding: 40px 50px;
+            border-radius: 20px;
+            text-align: center;
+            z-index: 100;
+            border: 1px solid rgba(255,255,255,0.15);
+            max-width: 500px;
+        }
+
+        #instructions h1 {
+            font-size: 32px;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #7df, #f7d);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        #instructions .subtitle {
+            color: #999;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        #instructions .key {
+            display: inline-block;
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 6px;
+            padding: 4px 10px;
+            margin: 2px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        #instructions .controls {
+            text-align: left;
+            margin: 16px 0;
+            line-height: 2;
+            font-size: 14px;
+        }
+
+        #instructions button {
+            margin-top: 20px;
+            padding: 12px 40px;
+            font-size: 18px;
+            border: none;
+            border-radius: 30px;
+            background: linear-gradient(135deg, #4af, #a4f);
+            color: white;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        #instructions button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 30px rgba(100,150,255,0.4);
+        }
+
+        #puzzle-complete {
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(20px);
+            color: white;
+            padding: 40px 50px;
+            border-radius: 20px;
+            text-align: center;
+            z-index: 100;
+            display: none;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+
+        #puzzle-complete h1 {
+            font-size: 36px;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #4f8, #ff4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="crosshair">+</div>
+
+    <div id="ui-overlay">
+        <div id="info-panel">
+            <h2>착시 현상</h2>
+            <span id="status-text">물건을 집어서 크기를 조절하세요</span>
+        </div>
+    </div>
+
+    <div id="pickup-hint">클릭으로 물건을 집으세요</div>
+    <div id="size-indicator"></div>
+
+    <div id="instructions">
+        <h1>착시 현상</h1>
+        <p class="subtitle">Forced Perspective Puzzle</p>
+        <div class="controls">
+            <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> 이동<br>
+            <span class="key">마우스</span> 시점 회전<br>
+            <span class="key">클릭</span> 물건 집기 / 놓기<br>
+            <span class="key">스크롤</span> 들고 있는 물건 거리 조절<br>
+        </div>
+        <p style="color:#aaa; font-size:13px; margin-top:8px;">
+            물건을 집어서 앞뒤로 이동하면<br>
+            원근감에 의해 크기가 변합니다!<br>
+            퍼즐 플랫폼 위에 맞는 크기로 놓으세요.
+        </p>
+        <button onclick="startGame()">시작하기</button>
+    </div>
+
+    <div id="puzzle-complete">
+        <h1>클리어!</h1>
+        <p id="complete-msg"></p>
+        <button onclick="nextLevel()" style="margin-top:20px; padding:12px 40px; font-size:18px; border:none; border-radius:30px; background:linear-gradient(135deg,#4f8,#4af); color:white; cursor:pointer;">다음 레벨</button>
+    </div>
+
+    <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let W, H;
+    function resize() {
+        W = canvas.width = window.innerWidth;
+        H = canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // Camera / Player
+    const camera = {
+        x: 0, y: 1.6, z: 0,
+        yaw: 0, pitch: 0,
+        speed: 0.06
+    };
+
+    const keys = {};
+
+    // 3D Math helpers
+    function project(x, y, z) {
+        // Translate relative to camera
+        let dx = x - camera.x;
+        let dy = y - camera.y;
+        let dz = z - camera.z;
+
+        // Rotate by yaw
+        let cosY = Math.cos(-camera.yaw);
+        let sinY = Math.sin(-camera.yaw);
+        let rx = dx * cosY - dz * sinY;
+        let rz = dx * sinY + dz * cosY;
+
+        // Rotate by pitch
+        let cosP = Math.cos(-camera.pitch);
+        let sinP = Math.sin(-camera.pitch);
+        let ry = dy * cosP - rz * sinP;
+        let rz2 = dy * sinP + rz * cosP;
+
+        if (rz2 <= 0.1) return null;
+
+        let fov = 600;
+        let sx = W / 2 + (rx / rz2) * fov;
+        let sy = H / 2 - (ry / rz2) * fov;
+        let scale = fov / rz2;
+
+        return { x: sx, y: sy, scale: scale, depth: rz2 };
+    }
+
+    // Objects
+    class GameObject {
+        constructor(x, y, z, size, color, shape, targetSize) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.baseSize = size;
+            this.size = size;       // current apparent world-size
+            this.color = color;
+            this.shape = shape;     // 'cube', 'sphere', 'pyramid', 'star', 'diamond'
+            this.targetSize = targetSize || null;
+            this.held = false;
+            this.holdDist = 3;
+            this.placed = false;
+            this.glowPhase = Math.random() * Math.PI * 2;
+        }
+
+        getScreenInfo() {
+            let p = project(this.x, this.y, this.z);
+            if (!p) return null;
+            p.screenSize = this.size * p.scale;
+            return p;
+        }
+
+        draw(ctx) {
+            let info = this.getScreenInfo();
+            if (!info) return;
+
+            let { x, y, screenSize, depth } = info;
+            let s = screenSize;
+
+            if (s < 1) return;
+
+            // Shadow on ground
+            let groundP = project(this.x, 0, this.z);
+            if (groundP && groundP.depth > 0) {
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath();
+                ctx.ellipse(groundP.x, groundP.y, s * 0.6, s * 0.15, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Glow effect
+            let glowIntensity = 0.3 + 0.1 * Math.sin(this.glowPhase + performance.now() * 0.003);
+
+            ctx.save();
+            ctx.translate(x, y);
+
+            // Draw shape
+            switch (this.shape) {
+                case 'cube':
+                    this.drawCube(ctx, s, glowIntensity);
+                    break;
+                case 'sphere':
+                    this.drawSphere(ctx, s, glowIntensity);
+                    break;
+                case 'pyramid':
+                    this.drawPyramid(ctx, s, glowIntensity);
+                    break;
+                case 'star':
+                    this.drawStar(ctx, s, glowIntensity);
+                    break;
+                case 'diamond':
+                    this.drawDiamond(ctx, s, glowIntensity);
+                    break;
+            }
+
+            ctx.restore();
+
+            // Size label when held
+            if (this.held) {
+                let pct = Math.round(this.size / this.baseSize * 100);
+                let sizeEl = document.getElementById('size-indicator');
+                sizeEl.textContent = `크기: ${pct}%`;
+                sizeEl.classList.add('visible');
+            }
+        }
+
+        drawCube(ctx, s, glow) {
+            let offset = s * 0.2;
+            // Back face
+            ctx.fillStyle = this.darken(this.color, 0.5);
+            ctx.fillRect(-s/2 + offset, -s/2 - offset, s, s);
+            // Side face
+            ctx.fillStyle = this.darken(this.color, 0.7);
+            ctx.beginPath();
+            ctx.moveTo(s/2, -s/2);
+            ctx.lineTo(s/2 + offset, -s/2 - offset);
+            ctx.lineTo(s/2 + offset, s/2 - offset);
+            ctx.lineTo(s/2, s/2);
+            ctx.fill();
+            // Top face
+            ctx.fillStyle = this.lighten(this.color, 0.3);
+            ctx.beginPath();
+            ctx.moveTo(-s/2, -s/2);
+            ctx.lineTo(-s/2 + offset, -s/2 - offset);
+            ctx.lineTo(s/2 + offset, -s/2 - offset);
+            ctx.lineTo(s/2, -s/2);
+            ctx.fill();
+            // Front face
+            ctx.fillStyle = this.color;
+            ctx.shadowColor = this.color;
+            ctx.shadowBlur = s * glow;
+            ctx.fillRect(-s/2, -s/2, s, s);
+            ctx.shadowBlur = 0;
+            // Highlight
+            let grad = ctx.createLinearGradient(-s/2, -s/2, s/2, s/2);
+            grad.addColorStop(0, 'rgba(255,255,255,0.2)');
+            grad.addColorStop(1, 'rgba(0,0,0,0.1)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(-s/2, -s/2, s, s);
+        }
+
+        drawSphere(ctx, s, glow) {
+            let grad = ctx.createRadialGradient(-s*0.2, -s*0.2, s*0.05, 0, 0, s);
+            grad.addColorStop(0, this.lighten(this.color, 0.5));
+            grad.addColorStop(0.5, this.color);
+            grad.addColorStop(1, this.darken(this.color, 0.3));
+            ctx.fillStyle = grad;
+            ctx.shadowColor = this.color;
+            ctx.shadowBlur = s * glow;
+            ctx.beginPath();
+            ctx.arc(0, 0, s, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        drawPyramid(ctx, s, glow) {
+            ctx.shadowColor = this.color;
+            ctx.shadowBlur = s * glow;
+            // Front face
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.moveTo(0, -s);
+            ctx.lineTo(-s, s * 0.6);
+            ctx.lineTo(s * 0.2, s * 0.6);
+            ctx.fill();
+            // Right face
+            ctx.fillStyle = this.darken(this.color, 0.6);
+            ctx.beginPath();
+            ctx.moveTo(0, -s);
+            ctx.lineTo(s * 0.2, s * 0.6);
+            ctx.lineTo(s, s * 0.6);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        drawStar(ctx, s, glow) {
+            ctx.shadowColor = this.color;
+            ctx.shadowBlur = s * glow * 2;
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+                let angle = -Math.PI/2 + i * Math.PI * 2 / 5;
+                let ox = Math.cos(angle) * s;
+                let oy = Math.sin(angle) * s;
+                if (i === 0) ctx.moveTo(ox, oy);
+                else ctx.lineTo(ox, oy);
+                angle += Math.PI * 2 / 10;
+                let ix = Math.cos(angle) * s * 0.4;
+                let iy = Math.sin(angle) * s * 0.4;
+                ctx.lineTo(ix, iy);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            // inner highlight
+            ctx.fillStyle = this.lighten(this.color, 0.4);
+            ctx.beginPath();
+            ctx.arc(0, 0, s * 0.25, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        drawDiamond(ctx, s, glow) {
+            ctx.shadowColor = this.color;
+            ctx.shadowBlur = s * glow;
+            // Left half
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.moveTo(0, -s * 1.3);
+            ctx.lineTo(-s * 0.8, 0);
+            ctx.lineTo(0, s * 1.3);
+            ctx.lineTo(0, -s * 1.3);
+            ctx.fill();
+            // Right half
+            ctx.fillStyle = this.darken(this.color, 0.7);
+            ctx.beginPath();
+            ctx.moveTo(0, -s * 1.3);
+            ctx.lineTo(s * 0.8, 0);
+            ctx.lineTo(0, s * 1.3);
+            ctx.lineTo(0, -s * 1.3);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            // Shine
+            ctx.fillStyle = 'rgba(255,255,255,0.2)';
+            ctx.beginPath();
+            ctx.moveTo(0, -s * 1.3);
+            ctx.lineTo(-s * 0.3, -s * 0.2);
+            ctx.lineTo(0, s * 0.2);
+            ctx.lineTo(s * 0.1, -s * 0.4);
+            ctx.fill();
+        }
+
+        darken(color, factor) {
+            let r = parseInt(color.slice(1,3), 16);
+            let g = parseInt(color.slice(3,5), 16);
+            let b = parseInt(color.slice(5,7), 16);
+            r = Math.floor(r * factor);
+            g = Math.floor(g * factor);
+            b = Math.floor(b * factor);
+            return `rgb(${r},${g},${b})`;
+        }
+
+        lighten(color, factor) {
+            let r = parseInt(color.slice(1,3), 16);
+            let g = parseInt(color.slice(3,5), 16);
+            let b = parseInt(color.slice(5,7), 16);
+            r = Math.min(255, Math.floor(r + (255 - r) * factor));
+            g = Math.min(255, Math.floor(g + (255 - g) * factor));
+            b = Math.min(255, Math.floor(b + (255 - b) * factor));
+            return `rgb(${r},${g},${b})`;
+        }
+    }
+
+    // Puzzle Platforms (target zones)
+    class PuzzlePlatform {
+        constructor(x, y, z, targetSize, color) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.targetSize = targetSize;
+            this.color = color;
+            this.satisfied = false;
+            this.pulsePhase = Math.random() * Math.PI * 2;
+        }
+
+        draw(ctx) {
+            let p = project(this.x, this.y, this.z);
+            if (!p || p.depth <= 0) return;
+
+            let s = this.targetSize * p.scale;
+
+            // Pulsing ring
+            let pulse = 0.8 + 0.2 * Math.sin(this.pulsePhase + performance.now() * 0.004);
+
+            ctx.save();
+            ctx.translate(p.x, p.y);
+
+            if (this.satisfied) {
+                ctx.strokeStyle = '#4f8';
+                ctx.shadowColor = '#4f8';
+                ctx.shadowBlur = 20;
+                ctx.lineWidth = 3;
+            } else {
+                ctx.strokeStyle = this.color;
+                ctx.shadowColor = this.color;
+                ctx.shadowBlur = 10 * pulse;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([8, 4]);
+            }
+
+            ctx.beginPath();
+            ctx.arc(0, 0, s * pulse, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Size label
+            ctx.setLineDash([]);
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = this.satisfied ? '#4f8' : 'rgba(255,255,255,0.5)';
+            ctx.font = `${Math.max(10, s * 0.3)}px sans-serif`;
+            ctx.textAlign = 'center';
+            let pct = Math.round(this.targetSize / objects[0]?.baseSize * 100) || 100;
+            ctx.fillText(this.satisfied ? '✓' : `${pct}%`, 0, s + 16);
+
+            ctx.restore();
+        }
+    }
+
+    // Game state
+    let objects = [];
+    let platforms = [];
+    let heldObject = null;
+    let hoveredObject = null;
+    let gameStarted = false;
+    let currentLevel = 0;
+    let solvedCount = 0;
+
+    // Levels
+    const levels = [
+        {
+            name: "기본 훈련",
+            desc: "물건을 집어서 플랫폼 크기에 맞게 놓으세요",
+            objects: [
+                { x: 2, y: 0.5, z: 5, size: 0.5, color: '#ff6644', shape: 'cube', targetSize: 0.25 }
+            ],
+            platforms: [
+                { x: -3, y: 0.5, z: 8, targetSize: 0.25, color: '#ff6644' }
+            ]
+        },
+        {
+            name: "두 개의 물건",
+            desc: "두 물건의 크기를 각각 맞추세요",
+            objects: [
+                { x: 3, y: 0.5, z: 4, size: 0.5, color: '#44aaff', shape: 'sphere', targetSize: 0.75 },
+                { x: -2, y: 0.6, z: 6, size: 0.4, color: '#ffaa22', shape: 'pyramid', targetSize: 0.2 }
+            ],
+            platforms: [
+                { x: -4, y: 0.5, z: 10, targetSize: 0.75, color: '#44aaff' },
+                { x: 4, y: 0.5, z: 12, targetSize: 0.2, color: '#ffaa22' }
+            ]
+        },
+        {
+            name: "별과 다이아몬드",
+            desc: "세 물건을 올바른 크기로!",
+            objects: [
+                { x: 1, y: 0.5, z: 3, size: 0.3, color: '#ffdd00', shape: 'star', targetSize: 0.6 },
+                { x: -3, y: 0.5, z: 5, size: 0.6, color: '#dd44ff', shape: 'diamond', targetSize: 0.3 },
+                { x: 4, y: 0.5, z: 7, size: 0.5, color: '#44ffaa', shape: 'cube', targetSize: 0.5 }
+            ],
+            platforms: [
+                { x: 0, y: 0.5, z: 12, targetSize: 0.6, color: '#ffdd00' },
+                { x: -5, y: 0.5, z: 14, targetSize: 0.3, color: '#dd44ff' },
+                { x: 5, y: 0.5, z: 10, targetSize: 0.5, color: '#44ffaa' }
+            ]
+        }
+    ];
+
+    function loadLevel(idx) {
+        if (idx >= levels.length) idx = 0;
+        currentLevel = idx;
+        let level = levels[idx];
+
+        objects = level.objects.map(o =>
+            new GameObject(o.x, o.y, o.z, o.size, o.color, o.shape, o.targetSize)
+        );
+
+        platforms = level.platforms.map(p =>
+            new PuzzlePlatform(p.x, p.y, p.z, p.targetSize, p.color)
+        );
+
+        solvedCount = 0;
+        heldObject = null;
+
+        camera.x = 0;
+        camera.y = 1.6;
+        camera.z = 0;
+        camera.yaw = 0;
+        camera.pitch = 0;
+
+        document.getElementById('status-text').textContent =
+            `레벨 ${idx + 1}: ${level.name} — ${level.desc}`;
+    }
+
+    function startGame() {
+        document.getElementById('instructions').style.display = 'none';
+        canvas.requestPointerLock();
+        gameStarted = true;
+        loadLevel(0);
+    }
+
+    function nextLevel() {
+        document.getElementById('puzzle-complete').style.display = 'none';
+        canvas.requestPointerLock();
+        loadLevel(currentLevel + 1);
+    }
+
+    // Input
+    document.addEventListener('keydown', e => { keys[e.code] = true; });
+    document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+    document.addEventListener('mousemove', e => {
+        if (!document.pointerLockElement) return;
+        camera.yaw += e.movementX * 0.002;
+        camera.pitch -= e.movementY * 0.002;
+        camera.pitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, camera.pitch));
+    });
+
+    canvas.addEventListener('click', () => {
+        if (!gameStarted) return;
+        if (!document.pointerLockElement) {
+            canvas.requestPointerLock();
+            return;
+        }
+
+        if (heldObject) {
+            // Drop object — its size stays as modified
+            heldObject.held = false;
+            heldObject = null;
+            document.getElementById('size-indicator').classList.remove('visible');
+            checkPuzzle();
+        } else if (hoveredObject) {
+            // Pick up object
+            heldObject = hoveredObject;
+            heldObject.held = true;
+            let dx = heldObject.x - camera.x;
+            let dz = heldObject.z - camera.z;
+            heldObject.holdDist = Math.sqrt(dx * dx + dz * dz);
+        }
+    });
+
+    canvas.addEventListener('wheel', e => {
+        if (heldObject) {
+            // 스크롤로 직접 크기 조절
+            let delta = -e.deltaY * 0.001;
+            heldObject.sizeScale = (heldObject.sizeScale || 1) + delta;
+            heldObject.sizeScale = Math.max(0.1, Math.min(5, heldObject.sizeScale));
+        }
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+        if (!document.pointerLockElement && gameStarted) {
+            // Paused
+        }
+    });
+
+    // Check if puzzle is solved
+    function checkPuzzle() {
+        solvedCount = 0;
+
+        for (let i = 0; i < objects.length; i++) {
+            let obj = objects[i];
+            let plat = platforms[i];
+            if (!plat) continue;
+
+            let dx = obj.x - plat.x;
+            let dz = obj.z - plat.z;
+            let dist = Math.sqrt(dx * dx + dz * dz);
+
+            let sizeRatio = obj.size / plat.targetSize;
+
+            if (dist < 2.0 && sizeRatio > 0.8 && sizeRatio < 1.2) {
+                plat.satisfied = true;
+                solvedCount++;
+            } else {
+                plat.satisfied = false;
+            }
+        }
+
+        if (solvedCount === platforms.length && platforms.length > 0) {
+            setTimeout(() => {
+                document.exitPointerLock();
+                let el = document.getElementById('puzzle-complete');
+                document.getElementById('complete-msg').textContent =
+                    `레벨 ${currentLevel + 1} "${levels[currentLevel].name}" 클리어!`;
+                el.style.display = 'block';
+            }, 500);
+        }
+    }
+
+    // Update
+    function update() {
+        if (!gameStarted || !document.pointerLockElement) return;
+
+        let forward = { x: Math.sin(camera.yaw), z: Math.cos(camera.yaw) };
+        let right = { x: Math.cos(camera.yaw), z: -Math.sin(camera.yaw) };
+
+        let moveSpeed = camera.speed;
+        if (keys['ShiftLeft'] || keys['ShiftRight']) moveSpeed *= 2;
+
+        if (keys['KeyW']) { camera.x += forward.x * moveSpeed; camera.z += forward.z * moveSpeed; }
+        if (keys['KeyS']) { camera.x -= forward.x * moveSpeed; camera.z -= forward.z * moveSpeed; }
+        if (keys['KeyA']) { camera.x -= right.x * moveSpeed; camera.z -= right.z * moveSpeed; }
+        if (keys['KeyD']) { camera.x += right.x * moveSpeed; camera.z += right.z * moveSpeed; }
+
+        // Update held object position
+        if (heldObject) {
+            let dist = heldObject.holdDist;
+            let dir = {
+                x: Math.sin(camera.yaw) * Math.cos(camera.pitch),
+                y: Math.sin(camera.pitch),
+                z: Math.cos(camera.yaw) * Math.cos(camera.pitch)
+            };
+
+            heldObject.x = camera.x + dir.x * dist;
+            heldObject.y = camera.y + dir.y * dist;
+            heldObject.z = camera.z + dir.z * dist;
+
+            // 스크롤로 직접 크기 조절
+            if (!heldObject.sizeScale) heldObject.sizeScale = heldObject.size / heldObject.baseSize || 1;
+            heldObject.size = heldObject.baseSize * heldObject.sizeScale;
+
+            // Clamp to ground
+            if (heldObject.y < heldObject.size * 0.5) {
+                heldObject.y = heldObject.size * 0.5;
+            }
+        }
+
+        // Check hover
+        hoveredObject = null;
+        let bestDist = Infinity;
+
+        for (let obj of objects) {
+            if (obj.held || obj.placed) continue;
+            let info = obj.getScreenInfo();
+            if (!info) continue;
+
+            let dx = info.x - W / 2;
+            let dy = info.y - H / 2;
+            let d = Math.sqrt(dx * dx + dy * dy);
+
+            if (d < info.screenSize * 1.5 && d < bestDist) {
+                bestDist = d;
+                hoveredObject = obj;
+            }
+        }
+
+        // Update hint
+        let hint = document.getElementById('pickup-hint');
+        if (hoveredObject && !heldObject) {
+            hint.textContent = '클릭으로 물건을 집으세요';
+            hint.classList.add('visible');
+        } else if (heldObject) {
+            hint.textContent = '클릭으로 놓기 | 스크롤로 크기 조절';
+            hint.classList.add('visible');
+        } else {
+            hint.classList.remove('visible');
+        }
+    }
+
+    // Draw ground grid
+    function drawGround() {
+        let gridSize = 40;
+        let step = 2;
+
+        for (let x = -gridSize; x <= gridSize; x += step) {
+            let p1 = project(x, 0, -gridSize);
+            let p2 = project(x, 0, gridSize);
+            if (p1 && p2) {
+                ctx.strokeStyle = 'rgba(100,140,180,0.15)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+            }
+        }
+        for (let z = -gridSize; z <= gridSize; z += step) {
+            let p1 = project(-gridSize, 0, z);
+            let p2 = project(gridSize, 0, z);
+            if (p1 && p2) {
+                ctx.strokeStyle = 'rgba(100,140,180,0.15)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+            }
+        }
+    }
+
+    // Draw skybox gradient
+    function drawSky() {
+        let grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, '#0a0a2e');
+        grad.addColorStop(0.4, '#1a1a3e');
+        grad.addColorStop(0.7, '#2a2a4e');
+        grad.addColorStop(1, '#1a1a2e');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+
+        // Stars
+        let seed = 12345;
+        function rand() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+
+        for (let i = 0; i < 100; i++) {
+            let sx = rand() * W;
+            let sy = rand() * H * 0.5;
+            let bright = rand() * 0.5 + 0.2;
+            let twinkle = Math.sin(performance.now() * 0.001 * (i % 5 + 1) + i) * 0.3 + 0.7;
+            ctx.fillStyle = `rgba(200,220,255,${bright * twinkle})`;
+            ctx.fillRect(sx, sy, 1.5, 1.5);
+        }
+    }
+
+    // Draw distance markers on ground
+    function drawDistanceMarkers() {
+        for (let z = 5; z <= 25; z += 5) {
+            let p = project(0, 0.01, z);
+            if (p && p.depth > 0) {
+                ctx.fillStyle = 'rgba(100,200,255,0.3)';
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${z}m`, p.x, p.y);
+            }
+        }
+    }
+
+    // Main render
+    function render() {
+        requestAnimationFrame(render);
+        update();
+
+        drawSky();
+        drawGround();
+        drawDistanceMarkers();
+
+        // Collect all drawables with depth
+        let drawList = [];
+
+        for (let plat of platforms) {
+            let p = project(plat.x, plat.y, plat.z);
+            if (p) drawList.push({ depth: p.depth, draw: () => plat.draw(ctx) });
+        }
+
+        for (let obj of objects) {
+            let info = obj.getScreenInfo();
+            if (info) drawList.push({ depth: info.depth, draw: () => obj.draw(ctx) });
+        }
+
+        // Sort far-to-near
+        drawList.sort((a, b) => b.depth - a.depth);
+        drawList.forEach(d => d.draw());
+
+        // Hover highlight
+        if (hoveredObject && !heldObject) {
+            let info = hoveredObject.getScreenInfo();
+            if (info) {
+                ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.arc(info.x, info.y, info.screenSize * 1.3, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+    }
+
+    render();
+    </script>
+</body>
+</html>

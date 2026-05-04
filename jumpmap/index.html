@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Jump Map - 점프맵 게임</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  overflow: hidden;
+  font-family: 'Apple SD Gothic Neo', sans-serif;
+}
+canvas {
+  border: 2px solid #333;
+  border-radius: 8px;
+  box-shadow: 0 0 40px rgba(100, 100, 255, 0.3);
+}
+</style>
+</head>
+<body>
+<canvas id="game" width="1200" height="700"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// Game state
+const GRAVITY = 0.6;
+const JUMP_FORCE = -13;
+const MOVE_SPEED = 5;
+const PLAYER_SIZE = 28;
+
+let camera = { x: 0, y: 0 };
+let deathCount = 0;
+let startTime = Date.now();
+
+const player = {
+  x: 50, y: 0, vx: 0, vy: 0,
+  onGround: false, alive: true,
+  spawnX: 50, spawnY: 0,
+  jumpCount: 0, maxJumps: 1,
+  trail: []
+};
+
+const keys = {};
+let currentStage = 0;
+let gameWon = false;
+let showMessage = '';
+let messageTimer = 0;
+let particles = [];
+
+// Stage definitions
+function buildStages() {
+  const stages = [];
+  let offsetX = 0;
+
+  // ===== STAGE 1: 기초 점프 =====
+  {
+    const s = { platforms: [], spikes: [], checkpoints: [], movers: [], portals: [], label: 'Stage 1: 첫 걸음', startX: offsetX };
+    // Ground
+    s.platforms.push({ x: offsetX, y: 600, w: 300, h: 40 });
+    s.platforms.push({ x: offsetX + 350, y: 600, w: 200, h: 40 });
+    s.platforms.push({ x: offsetX + 600, y: 600, w: 200, h: 40 });
+    s.platforms.push({ x: offsetX + 850, y: 600, w: 300, h: 40 });
+    // Checkpoint
+    s.checkpoints.push({ x: offsetX + 1050, y: 560, collected: false });
+    s.endX = offsetX + 1150;
+    stages.push(s);
+    offsetX += 1200;
+  }
+
+  // ===== STAGE 2: 높이 점프 =====
+  {
+    const s = { platforms: [], spikes: [], checkpoints: [], movers: [], portals: [], label: 'Stage 2: 계단 오르기', startX: offsetX };
+    s.platforms.push({ x: offsetX, y: 600, w: 200, h: 40 });
+    s.platforms.push({ x: offsetX + 180, y: 520, w: 150, h: 25 });
+    s.platforms.push({ x: offsetX + 350, y: 440, w: 150, h: 25 });
+    s.platforms.push({ x: offsetX + 520, y: 360, w: 150, h: 25 });
+    s.platforms.push({ x: offsetX + 350, y: 280, w: 150, h: 25 });
+    s.platforms.push({ x: offsetX + 550, y: 220, w: 200, h: 25 });
+    s.platforms.push({ x: offsetX + 800, y: 300, w: 200, h: 25 });
+    s.platforms.push({ x: offsetX + 800, y: 600, w: 200, h: 40 });
+    s.checkpoints.push({ x: offsetX + 900, y: 260, collected: false });
+    s.endX = offsetX + 1000;
+    stages.push(s);
+    offsetX += 1050;
+  }
+
+  // ===== STAGE 3: 가시 등장 =====
+  {
+    const s = { platforms: [], spikes: [], checkpoints: [], movers: [], portals: [], label: 'Stage 3: 가시 조심!', startX: offsetX };
+    s.platforms.push({ x: offsetX, y: 600, w: 200, h: 40 });
+    s.platforms.push({ x: offsetX + 250, y: 600, w: 300, h: 40 });
+    s.spikes.push({ x: offsetX + 330, y: 580, w: 80, h: 20 });
+    s.platforms.push({ x: offsetX + 600, y: 600, w: 150, h: 40 });
+    s.platforms.push({ x: offsetX + 800, y: 520, w: 150, h: 25 });
+    s.platforms.push({ x: offsetX + 1000, y: 440, w: 150, h: 25 });
+    s.spikes.push({ x: offsetX + 1030, y: 420, w: 40, h: 20 });
+    s.platforms.push({ x: offsetX + 1200, y: 500, w: 200, h: 25 });
+    s.platforms.push({ x: offsetX + 1200, y: 600, w: 200, h: 40 });
+    s.checkpoints.push({ x: offsetX + 1300, y: 460, collected: false });
+    s.endX = offsetX + 1400;
+    stages.push(s);
+    offsetX += 1450;
+  }
+
+  // ===== STAGE 4: 좁은 통로 =====
+  {
+    const s = { platforms: [], spikes: [], checkpoints: [], movers: [], portals: [], label: 'Stage 4: 정밀 점프', startX: offsetX };
+    s.platforms.push({ x: offsetX, y: 600, w: 150, h: 40 });
+    s.platforms.push({ x: offsetX + 220, y: 550, w: 80, h: 25 });
+    s.platforms.push({ x: offsetX + 370, y: 490, w: 80, h: 25 });
+    s.spikes.push({ x: offsetX + 380, y: 470, w: 30, h: 20 });
+    s.platforms.push({ x: offsetX + 510, y: 430, w: 80, h: 25 });
+    s.platforms.push({ x: offsetX + 650, y: 490, w: 80, h: 25 });
+    s.spikes.push({ x: offsetX + 660, y: 470, w: 30, h: 20 });
+    s.platforms.push({ x: offsetX + 790, y: 550, w: 80, h: 25 });
+    s.platforms.push({ x: offsetX + 940, y: 600, w: 200, h: 40 });
+    s.checkpoints.push({ x: offsetX + 1020, y: 560, collected: false });
+    s.endX = offsetX + 1140;
+    stages.push(s);
+    offsetX += 1200;
+  }
+
+  // ===== STAGE 5: 움직이는 발판 =====
+  {
+    const s = { platforms: [], spikes: [], checkpoints: [], movers: [], portals: [], label: 'Stage 5: 움직이는 발판', startX: offsetX };
+    s.platforms.push({ x: offsetX, y: 600, w: 200, h: 40 });
+    s.movers.push({ x: offsetX + 300, y: 500, w: 120, h: 25, sx: offsetX + 300, sy: 500, ex: offsetX + 300, ey: 350, speed: 0.008, t: 0 });
+    s.platforms.push({ x: offsetX + 500, y: 400, w: 100, h: 25 });
+    s.movers.push({ x: offsetX + 680, y: 400, w: 120, h: 25, sx: offsetX + 680, sy: 400, ex: offsetX + 880, ey: 400, speed: 0.01, t: 0 });
+    s.platforms.push({ x: offsetX + 1050, y: 450, w: 150, h: 25 });
+    s.platforms.push({ x: offsetX + 1050, y: 600, w: 200, h: 40 });
+    s.checkpoints.push({ x: offsetX + 1130, y: 410, collected: false });
+    s.endX = offsetX + 1250;
+    stages.push(s);
+    offsetX += 1300;
+  }
+
+  // ===== STAGE 6: 낙하 구간 =====
+  {
+    const s = { platforms: [], spikes: [], checkpoints: [], movers: [], portals: [], label: 'Stage 6: 낙하 지대', startX: offsetX };
+    s.platforms.push({ x: offsetX, y: 600, w: 200, h: 40 });
+    s.platforms.push({ x: offsetX + 250, y: 500, w: 100, h: 25 });
+    s.platforms.push({ x: offsetX + 400, y: 400, w: 100, h: 25 });
+    s.platforms.push({ x: offsetX + 550, y: 300, w: 100, h: 25 });
+    // Drop down section
+    s.platforms.push({ x: offsetX + 700, y: 200, w: 150, h: 25 });
+    s.platforms.push({ x: offsetX + 750, y: 350, w: 80, h: 25 });
+    s.spikes.push({ x: offsetX + 680, y: 470, w: 200, h: 20 });
+    s.platforms.push({ x: offsetX + 660, y: 490, w: 240, h: 25 });
+    s.platforms.push({ x: offsetX + 900, y: 350, w: 80, h: 25 });
+    s.platforms.push({ x: offsetX + 1050, y: 450, w: 150, h: 25 });
+    s.platforms.push({ x: offsetX + 1050, y: 600, w: 200, h: 40 });
+    s.checkpoints.push({ x: offsetX + 1120, y: 410, collected: false });
+    s.endX = offsetX + 1250;
+    stages.push(s);
+    offsetX += 1300;
+  }
+
+  // ===== STAGE 7: 가시 밭 =====
+  {
+    const s = { platforms: [], spikes: [], checkpoints: [], movers: [], portals: [], label: 'Stage 7: 가시 밭', startX: offsetX };
+    s.platforms.push({ x: offsetX, y: 600, w: 150, h: 40 });
+    // Long platform with spike gaps
+    for (let i = 0; i < 5; i++) {
+      s.platforms.push({ x: offsetX + 200 + i * 200, y: 500, w: 100, h: 25 });
+      if (i < 4) {
+        s.spikes.push({ x: offsetX + 300 + i * 200, y: 580, w: 100, h: 20 });
+        s.platforms.push({ x: offsetX + 300 + i * 200, y: 600, w: 100, h: 40 });
+      }
+    }
+    s.platforms.push({ x: offsetX + 1200, y: 600, w: 200, h: 40 });
+    s.checkpoints.push({ x: offsetX + 1300, y: 560, collected: false });
+    s.endX = offsetX + 1400;
+    stages.push(s);
+    offsetX += 1450;
+  }
+
+  // ===== STAGE 8: 복합 무빙 =====
+  {
+    const s = { platforms: [], spikes: [], checkpoints: [], movers: [], portals: [], label: 'Stage 8: 무빙 지옥', startX: offsetX };
+    s.platforms.push({ x: offsetX, y: 600, w: 150, h: 40 });
+    s.movers.push({ x: offsetX + 250, y: 500, w: 100, h: 25, sx: offsetX + 250, sy: 500, ex: offsetX + 250, ey: 300, speed: 0.012, t: 0 });
+    s.movers.push({ x: offsetX + 450, y: 350, w: 100, h: 25, sx: offsetX + 450, sy: 350, ex: offsetX + 650, ey: 350, speed: 0.015, t: 0.5 });
+    s.spikes.push({ x: offsetX + 500, y: 580, w: 200, h: 20 });
+    s.platforms.push({ x: offsetX + 500, y: 600, w: 200, h: 40 });
+    s.movers.push({ x: offsetX + 750, y: 300, w: 100, h: 25, sx: offsetX + 750, sy: 450, ex: offsetX + 750, ey: 250, speed: 0.01, t: 0.3 });
+    s.platforms.push({ x: offsetX + 950, y: 400, w: 100, h: 25 });
+    s.spikes.push({ x: offsetX + 960, y: 380, w: 40, h: 20 });
+    s.platforms.push({ x: offsetX + 1100, y: 500, w: 200, h: 25 });
+    s.platforms.push({ x: offsetX + 1100, y: 600, w: 200, h: 40 });
+    s.checkpoints.push({ x: offsetX + 1200, y: 460, collected: false });
+    s.endX = offsetX + 1300;
+    stages.push(s);
+    offsetX += 1350;
+  }
+
+  // ===== STAGE 9: 사라지는 발판 =====
+  {
+    const s = { platforms: [], spikes: [], checkpoints: [], movers: [], portals: [], label: 'Stage 9: 사라지는 발판', startX: offsetX };
+    s.platforms.push({ x: offsetX, y: 600, w: 150, h: 40 });
+    // Blinking platforms
+    for (let i = 0; i < 6; i++) {
+      s.platforms.push({
+        x: offsetX + 200 + i * 170, y: 500 - (i % 2) * 80, w: 100, h: 25,
+        blink: true, blinkRate: 0.006 + i * 0.001, blinkPhase: i * 0.3, visible: true
+      });
+    }
+    s.spikes.push({ x: offsetX + 200, y: 580, w: 900, h: 20 });
+    s.platforms.push({ x: offsetX + 200, y: 600, w: 900, h: 40 });
+    s.platforms.push({ x: offsetX + 1200, y: 500, w: 200, h: 25 });
+    s.platforms.push({ x: offsetX + 1200, y: 600, w: 200, h: 40 });
+    s.checkpoints.push({ x: offsetX + 1300, y: 460, collected: false });
+    s.endX = offsetX + 1400;
+    stages.push(s);
+    offsetX += 1450;
+  }
+
+  // ===== STAGE 10: 최종 스테이지 - 총집합 =====
+  {
+    const s = { platforms: [], spikes: [], checkpoints: [], movers: [], portals: [], label: 'FINAL STAGE: 총집합!', startX: offsetX };
+    s.platforms.push({ x: offsetX, y: 600, w: 150, h: 40 });
+
+    // Section A: Spike jumps
+    s.platforms.push({ x: offsetX + 200, y: 600, w: 400, h: 40 });
+    s.spikes.push({ x: offsetX + 280, y: 580, w: 60, h: 20 });
+    s.spikes.push({ x: offsetX + 420, y: 580, w: 60, h: 20 });
+    s.platforms.push({ x: offsetX + 250, y: 480, w: 80, h: 25 });
+    s.platforms.push({ x: offsetX + 420, y: 400, w: 80, h: 25 });
+
+    // Section B: Moving platforms over spikes
+    s.spikes.push({ x: offsetX + 600, y: 580, w: 400, h: 20 });
+    s.platforms.push({ x: offsetX + 600, y: 600, w: 400, h: 40 });
+    s.movers.push({ x: offsetX + 620, y: 450, w: 90, h: 25, sx: offsetX + 620, sy: 450, ex: offsetX + 620, ey: 300, speed: 0.012, t: 0 });
+    s.movers.push({ x: offsetX + 800, y: 350, w: 90, h: 25, sx: offsetX + 800, sy: 350, ex: offsetX + 950, ey: 350, speed: 0.015, t: 0.5 });
+
+    // Section C: Blinking + spikes
+    s.platforms.push({ x: offsetX + 1050, y: 300, w: 80, h: 25 });
+    for (let i = 0; i < 4; i++) {
+      s.platforms.push({
+        x: offsetX + 1180 + i * 140, y: 280 - (i % 2) * 60, w: 80, h: 25,
+        blink: true, blinkRate: 0.008, blinkPhase: i * 0.4, visible: true
+      });
+    }
+    s.spikes.push({ x: offsetX + 1100, y: 580, w: 600, h: 20 });
+    s.platforms.push({ x: offsetX + 1100, y: 600, w: 600, h: 40 });
+
+    // Section D: Vertical climb with movers
+    s.platforms.push({ x: offsetX + 1750, y: 500, w: 80, h: 25 });
+    s.movers.push({ x: offsetX + 1850, y: 400, w: 80, h: 25, sx: offsetX + 1850, sy: 500, ex: offsetX + 1850, ey: 250, speed: 0.01, t: 0 });
+    s.platforms.push({ x: offsetX + 1950, y: 200, w: 100, h: 25 });
+    s.spikes.push({ x: offsetX + 1960, y: 180, w: 30, h: 20 });
+
+    // Section E: Final precision jumps
+    s.platforms.push({ x: offsetX + 2100, y: 250, w: 60, h: 25 });
+    s.platforms.push({ x: offsetX + 2220, y: 300, w: 60, h: 25 });
+    s.spikes.push({ x: offsetX + 2225, y: 280, w: 25, h: 20 });
+    s.platforms.push({ x: offsetX + 2340, y: 350, w: 60, h: 25 });
+    s.platforms.push({ x: offsetX + 2460, y: 400, w: 60, h: 25 });
+
+    // Goal platform
+    s.platforms.push({ x: offsetX + 2580, y: 450, w: 200, h: 30 });
+    s.platforms.push({ x: offsetX + 2580, y: 600, w: 200, h: 40 });
+
+    s.checkpoints.push({ x: offsetX + 2650, y: 410, collected: false });
+    s.endX = offsetX + 2780;
+    stages.push(s);
+  }
+
+  return stages;
+}
+
+let stages = buildStages();
+
+// Get all objects across all stages
+function getAllPlatforms() {
+  let all = [];
+  stages.forEach(s => { all = all.concat(s.platforms); all = all.concat(s.movers); });
+  return all;
+}
+function getAllSpikes() {
+  let all = [];
+  stages.forEach(s => all = all.concat(s.spikes));
+  return all;
+}
+function getAllCheckpoints() {
+  let all = [];
+  stages.forEach(s => all = all.concat(s.checkpoints));
+  return all;
+}
+
+function respawn() {
+  player.x = player.spawnX;
+  player.y = player.spawnY - 50;
+  player.vx = 0;
+  player.vy = 0;
+  player.alive = true;
+  player.trail = [];
+  deathCount++;
+  spawnParticles(player.x, player.y, '#ff4444', 20);
+}
+
+function spawnParticles(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 8,
+      vy: (Math.random() - 0.5) * 8,
+      life: 1,
+      color,
+      size: Math.random() * 4 + 2
+    });
+  }
+}
+
+function showStageMessage(text) {
+  showMessage = text;
+  messageTimer = 180;
+}
+
+// Input
+function skipToStage(idx) {
+  if (idx < 0 || idx >= stages.length) return;
+  const s = stages[idx];
+  // Collect all previous checkpoints
+  for (let i = 0; i <= idx; i++) {
+    stages[i].checkpoints.forEach(cp => {
+      if (!cp.collected) {
+        cp.collected = true;
+      }
+    });
+  }
+  // Set spawn to start of target stage
+  const spawnX = s.startX + 60;
+  const spawnY = 500;
+  player.spawnX = spawnX;
+  player.spawnY = spawnY;
+  player.x = spawnX;
+  player.y = spawnY;
+  player.vx = 0;
+  player.vy = 0;
+  player.trail = [];
+  currentStage = idx;
+  lastStage = idx;
+  spawnParticles(player.x + PLAYER_SIZE / 2, player.y + PLAYER_SIZE / 2, '#ffdd00', 25);
+  showStageMessage(s.label);
+}
+
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space' || e.code === 'ArrowUp') e.preventDefault();
+  if (e.code === 'KeyR') respawn();
+  // Stage skip: 1~0 keys = stage 1~10
+  if (e.code >= 'Digit1' && e.code <= 'Digit9') {
+    skipToStage(parseInt(e.code.replace('Digit', '')) - 1);
+  }
+  if (e.code === 'Digit0') skipToStage(9);
+  // N = next stage, P = previous stage
+  if (e.code === 'KeyN') skipToStage(currentStage + 1);
+  if (e.code === 'KeyP') skipToStage(currentStage - 1);
+});
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+let lastStage = -1;
+
+function update() {
+  if (gameWon) return;
+
+  // Player input
+  if (keys['ArrowLeft'] || keys['KeyA']) player.vx = -MOVE_SPEED;
+  else if (keys['ArrowRight'] || keys['KeyD']) player.vx = MOVE_SPEED;
+  else player.vx *= 0.8;
+
+  if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.onGround) {
+    player.vy = JUMP_FORCE;
+    player.onGround = false;
+    spawnParticles(player.x + PLAYER_SIZE / 2, player.y + PLAYER_SIZE, '#88aaff', 5);
+  }
+
+  // Gravity
+  player.vy += GRAVITY;
+  if (player.vy > 15) player.vy = 15;
+
+  // Update movers
+  stages.forEach(s => {
+    s.movers.forEach(m => {
+      m.t += m.speed;
+      const f = (Math.sin(m.t * Math.PI * 2) + 1) / 2;
+      m.x = m.sx + (m.ex - m.sx) * f;
+      m.y = m.sy + (m.ey - m.sy) * f;
+    });
+  });
+
+  // Update blinking platforms
+  stages.forEach(s => {
+    s.platforms.forEach(p => {
+      if (p.blink) {
+        const v = Math.sin((Date.now() * p.blinkRate) + p.blinkPhase * Math.PI * 2);
+        p.visible = v > -0.3;
+      }
+    });
+  });
+
+  // Move X
+  player.x += player.vx;
+
+  // Collide X with platforms
+  const allPlats = getAllPlatforms();
+  allPlats.forEach(p => {
+    if (p.blink && !p.visible) return;
+    if (player.x + PLAYER_SIZE > p.x && player.x < p.x + p.w &&
+        player.y + PLAYER_SIZE > p.y && player.y < p.y + p.h) {
+      if (player.vx > 0) player.x = p.x - PLAYER_SIZE;
+      else if (player.vx < 0) player.x = p.x + p.w;
+    }
+  });
+
+  // Move Y
+  player.y += player.vy;
+  player.onGround = false;
+
+  // Collide Y with platforms
+  allPlats.forEach(p => {
+    if (p.blink && !p.visible) return;
+    if (player.x + PLAYER_SIZE > p.x && player.x < p.x + p.w &&
+        player.y + PLAYER_SIZE > p.y && player.y < p.y + p.h) {
+      if (player.vy > 0) {
+        player.y = p.y - PLAYER_SIZE;
+        player.vy = 0;
+        player.onGround = true;
+      } else if (player.vy < 0) {
+        player.y = p.y + p.h;
+        player.vy = 0;
+      }
+    }
+  });
+
+  // Spike collision
+  getAllSpikes().forEach(sp => {
+    if (player.x + PLAYER_SIZE - 4 > sp.x && player.x + 4 < sp.x + sp.w &&
+        player.y + PLAYER_SIZE - 4 > sp.y && player.y + 4 < sp.y + sp.h) {
+      respawn();
+    }
+  });
+
+  // Fall death
+  if (player.y > 800) respawn();
+
+  // Checkpoints
+  getAllCheckpoints().forEach(cp => {
+    if (!cp.collected &&
+        Math.abs(player.x + PLAYER_SIZE / 2 - cp.x) < 40 &&
+        Math.abs(player.y + PLAYER_SIZE / 2 - cp.y) < 40) {
+      cp.collected = true;
+      player.spawnX = cp.x - PLAYER_SIZE / 2;
+      player.spawnY = cp.y - PLAYER_SIZE / 2;
+      spawnParticles(cp.x, cp.y, '#00ff88', 30);
+      showStageMessage('체크포인트!');
+    }
+  });
+
+  // Detect current stage
+  for (let i = stages.length - 1; i >= 0; i--) {
+    if (player.x >= stages[i].startX - 50) {
+      if (i !== lastStage) {
+        lastStage = i;
+        showStageMessage(stages[i].label);
+      }
+      currentStage = i;
+      break;
+    }
+  }
+
+  // Win condition - reach end of last stage
+  const lastS = stages[stages.length - 1];
+  const lastCP = lastS.checkpoints[lastS.checkpoints.length - 1];
+  if (lastCP && lastCP.collected && player.x > lastS.endX - 200) {
+    gameWon = true;
+    spawnParticles(player.x, player.y, '#ffdd00', 50);
+    spawnParticles(player.x, player.y, '#ff44ff', 50);
+  }
+
+  // Trail
+  player.trail.push({ x: player.x, y: player.y, life: 1 });
+  if (player.trail.length > 12) player.trail.shift();
+  player.trail.forEach(t => t.life -= 0.08);
+
+  // Particles
+  particles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.1;
+    p.life -= 0.025;
+  });
+  particles = particles.filter(p => p.life > 0);
+
+  // Camera
+  const targetCX = player.x - canvas.width / 2 + PLAYER_SIZE / 2;
+  const targetCY = player.y - canvas.height / 2;
+  camera.x += (targetCX - camera.x) * 0.08;
+  camera.y += (targetCY - camera.y) * 0.06;
+  if (camera.y > 100) camera.y = 100;
+
+  if (messageTimer > 0) messageTimer--;
+}
+
+function draw() {
+  // Background gradient
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#0a0a2e');
+  grad.addColorStop(1, '#1a1a4e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Background stars
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  for (let i = 0; i < 80; i++) {
+    const sx = ((i * 137 + 50) % 2000) - camera.x * 0.1;
+    const sy = ((i * 97 + 30) % 700) - camera.y * 0.05;
+    const size = (i % 3) + 1;
+    ctx.fillRect(((sx % canvas.width) + canvas.width) % canvas.width, ((sy % canvas.height) + canvas.height) % canvas.height, size, size);
+  }
+
+  ctx.save();
+  ctx.translate(-camera.x, -camera.y);
+
+  // Draw platforms
+  stages.forEach((s, si) => {
+    s.platforms.forEach(p => {
+      if (p.blink && !p.visible) {
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = '#334';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.globalAlpha = 1;
+        return;
+      }
+      const pg = ctx.createLinearGradient(p.x, p.y, p.x, p.y + p.h);
+      if (si === stages.length - 1) {
+        pg.addColorStop(0, '#884422');
+        pg.addColorStop(1, '#552211');
+      } else {
+        pg.addColorStop(0, '#3a5a8a');
+        pg.addColorStop(1, '#2a3a5a');
+      }
+      ctx.fillStyle = pg;
+      ctx.fillRect(p.x, p.y, p.w, p.h);
+      ctx.strokeStyle = 'rgba(100,150,255,0.3)';
+      ctx.strokeRect(p.x, p.y, p.w, p.h);
+      if (p.blink) {
+        ctx.strokeStyle = 'rgba(255,200,50,0.4)';
+        ctx.strokeRect(p.x - 1, p.y - 1, p.w + 2, p.h + 2);
+      }
+    });
+
+    // Moving platforms
+    s.movers.forEach(m => {
+      const mg = ctx.createLinearGradient(m.x, m.y, m.x, m.y + m.h);
+      mg.addColorStop(0, '#5a8a3a');
+      mg.addColorStop(1, '#3a5a2a');
+      ctx.fillStyle = mg;
+      ctx.fillRect(m.x, m.y, m.w, m.h);
+      ctx.strokeStyle = 'rgba(100,255,100,0.4)';
+      ctx.strokeRect(m.x, m.y, m.w, m.h);
+    });
+
+    // Spikes
+    s.spikes.forEach(sp => {
+      ctx.fillStyle = '#ff3333';
+      const count = Math.floor(sp.w / 15);
+      for (let i = 0; i < count; i++) {
+        const tx = sp.x + i * (sp.w / count) + (sp.w / count) / 2;
+        ctx.beginPath();
+        ctx.moveTo(tx - 6, sp.y + sp.h);
+        ctx.lineTo(tx, sp.y);
+        ctx.lineTo(tx + 6, sp.y + sp.h);
+        ctx.fill();
+      }
+    });
+
+    // Checkpoints
+    s.checkpoints.forEach(cp => {
+      if (cp.collected) {
+        ctx.fillStyle = '#00ff88';
+        ctx.globalAlpha = 0.5 + Math.sin(Date.now() * 0.005) * 0.3;
+      } else {
+        ctx.fillStyle = '#ffaa00';
+        ctx.globalAlpha = 0.7 + Math.sin(Date.now() * 0.008) * 0.3;
+      }
+      // Flag pole
+      ctx.fillRect(cp.x - 2, cp.y - 10, 4, 50);
+      // Flag
+      ctx.beginPath();
+      ctx.moveTo(cp.x + 2, cp.y - 10);
+      ctx.lineTo(cp.x + 22, cp.y);
+      ctx.lineTo(cp.x + 2, cp.y + 10);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  });
+
+  // Trail
+  player.trail.forEach(t => {
+    if (t.life > 0) {
+      ctx.globalAlpha = t.life * 0.4;
+      ctx.fillStyle = '#4488ff';
+      ctx.fillRect(t.x + 4, t.y + 4, PLAYER_SIZE - 8, PLAYER_SIZE - 8);
+    }
+  });
+  ctx.globalAlpha = 1;
+
+  // Player (흐물흐물 슬라임)
+  if (player.alive) {
+    const t = Date.now() * 0.005;
+    const cx = player.x + PLAYER_SIZE / 2;
+    const cy = player.y + PLAYER_SIZE / 2;
+    const S = PLAYER_SIZE;
+
+    // Squash & stretch from velocity
+    const squashX = 1 + Math.abs(player.vx) * 0.03;
+    const squashY = player.vy < -2 ? 0.75 : (player.onGround ? 1.1 + Math.sin(t * 3) * 0.06 : 1.0);
+    const stretchX = 1 / squashY * (player.vy < -2 ? 1.15 : 1.0);
+    const stretchY = 1 / squashX;
+
+    const scaleX = stretchX * squashX + Math.sin(t * 4) * 0.05;
+    const scaleY = stretchY * squashY + Math.cos(t * 4) * 0.05;
+
+    ctx.save();
+    ctx.translate(cx, player.y + S); // anchor at bottom center
+    ctx.scale(scaleX, scaleY);
+
+    // Glow
+    ctx.shadowColor = '#4488ff';
+    ctx.shadowBlur = 18;
+
+    // Body - blobby shape using bezier curves
+    const w = S / 2;
+    const h = S;
+    const wobble1 = Math.sin(t * 5) * 3;
+    const wobble2 = Math.cos(t * 4.3) * 3;
+    const wobble3 = Math.sin(t * 3.7) * 2.5;
+    const wobble4 = Math.cos(t * 5.1) * 2.5;
+
+    ctx.beginPath();
+    // Start bottom-left
+    ctx.moveTo(-w + 2, 0);
+    // Bottom edge (flat on ground)
+    ctx.lineTo(w - 2, 0);
+    // Right side going up
+    ctx.bezierCurveTo(
+      w + 4 + wobble1, -h * 0.25,
+      w + 3 + wobble2, -h * 0.65,
+      wobble3 * 0.5, -h - wobble4 * 0.5
+    );
+    // Top (blobby dome)
+    ctx.bezierCurveTo(
+      -w * 0.3 + wobble4, -h - 3 + wobble1 * 0.3,
+      -w - 2 + wobble2, -h * 0.7,
+      -w - 3 + wobble3, -h * 0.3
+    );
+    // Left side going down
+    ctx.bezierCurveTo(
+      -w - 1 + wobble4, -h * 0.1,
+      -w + 1, 0,
+      -w + 2, 0
+    );
+    ctx.closePath();
+
+    const bodyGrad = ctx.createLinearGradient(0, 0, 0, -h);
+    bodyGrad.addColorStop(0, '#3366cc');
+    bodyGrad.addColorStop(0.5, '#5599ee');
+    bodyGrad.addColorStop(1, '#88ccff');
+    ctx.fillStyle = bodyGrad;
+    ctx.fill();
+
+    // Shiny highlight
+    ctx.beginPath();
+    ctx.ellipse(-w * 0.25 + wobble1 * 0.3, -h * 0.7 + wobble2 * 0.2, 4, 6, -0.3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+
+    // Eyes - 초롱초롱
+    const eyeDir = player.vx > 0.5 ? 3 : player.vx < -0.5 ? -3 : 0;
+    const eyeY = -h * 0.55 + Math.sin(t * 3) * 1.5;
+    const blinkAmount = Math.sin(t * 0.7) > 0.97 ? 0.15 : 1; // occasional blink
+    const lx = -5 + eyeDir + wobble1 * 0.2;
+    const ly = eyeY;
+    const rx = 7 + eyeDir + wobble2 * 0.2;
+    const ry = eyeY + wobble3 * 0.3;
+    const er = 5.5; // eye radius
+    const ebr = er * blinkAmount;
+
+    // Eye glow (soft outer glow)
+    ctx.shadowColor = '#aaddff';
+    ctx.shadowBlur = 12;
+
+    // Left eye white
+    const eyeGradL = ctx.createRadialGradient(lx - 1, ly - 1, 0, lx, ly, er);
+    eyeGradL.addColorStop(0, '#ffffff');
+    eyeGradL.addColorStop(0.7, '#e8f0ff');
+    eyeGradL.addColorStop(1, '#c0d8f0');
+    ctx.fillStyle = eyeGradL;
+    ctx.beginPath();
+    ctx.ellipse(lx, ly, er, ebr, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Right eye white
+    const eyeGradR = ctx.createRadialGradient(rx - 1, ry - 1, 0, rx, ry, er);
+    eyeGradR.addColorStop(0, '#ffffff');
+    eyeGradR.addColorStop(0.7, '#e8f0ff');
+    eyeGradR.addColorStop(1, '#c0d8f0');
+    ctx.fillStyle = eyeGradR;
+    ctx.beginPath();
+    ctx.ellipse(rx, ry, er, ebr, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+
+    // Iris (big colorful iris)
+    const pupilShift = eyeDir * 0.4;
+    const irisR = 3.5;
+    const ibr = irisR * blinkAmount;
+
+    // Left iris
+    const irisGradL = ctx.createRadialGradient(lx + pupilShift, ly + 0.5, 0, lx + pupilShift, ly + 0.5, irisR);
+    irisGradL.addColorStop(0, '#4488ff');
+    irisGradL.addColorStop(0.5, '#2266dd');
+    irisGradL.addColorStop(1, '#1144aa');
+    ctx.fillStyle = irisGradL;
+    ctx.beginPath();
+    ctx.ellipse(lx + pupilShift, ly + 0.5, irisR, ibr, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Right iris
+    const irisGradR = ctx.createRadialGradient(rx + pupilShift, ry + 0.5, 0, rx + pupilShift, ry + 0.5, irisR);
+    irisGradR.addColorStop(0, '#4488ff');
+    irisGradR.addColorStop(0.5, '#2266dd');
+    irisGradR.addColorStop(1, '#1144aa');
+    ctx.fillStyle = irisGradR;
+    ctx.beginPath();
+    ctx.ellipse(rx + pupilShift, ry + 0.5, irisR, ibr, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pupils (small dark center)
+    ctx.fillStyle = '#050510';
+    ctx.beginPath();
+    ctx.ellipse(lx + pupilShift, ly + 0.5, 1.5, 1.5 * blinkAmount, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(rx + pupilShift, ry + 0.5, 1.5, 1.5 * blinkAmount, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Sparkle highlights (초롱초롱 반짝!)
+    const sparklePhase = t * 2;
+    const sp1 = Math.sin(sparklePhase) * 0.3 + 0.7;
+    const sp2 = Math.cos(sparklePhase * 1.3) * 0.3 + 0.7;
+
+    ctx.fillStyle = `rgba(255,255,255,${sp1})`;
+    // Big sparkle - left eye
+    ctx.beginPath();
+    ctx.ellipse(lx + pupilShift - 1.5, ly - 1.8, 1.8, 1.8 * blinkAmount, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Big sparkle - right eye
+    ctx.beginPath();
+    ctx.ellipse(rx + pupilShift - 1.5, ry - 1.8, 1.8, 1.8 * blinkAmount, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(255,255,255,${sp2})`;
+    // Small sparkle - left eye
+    ctx.beginPath();
+    ctx.ellipse(lx + pupilShift + 1.5, ly + 1.2, 0.9, 0.9 * blinkAmount, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Small sparkle - right eye
+    ctx.beginPath();
+    ctx.ellipse(rx + pupilShift + 1.5, ry + 1.2, 0.9, 0.9 * blinkAmount, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Star sparkle (십자 반짝이)
+    if (blinkAmount > 0.5) {
+      const starX = lx + pupilShift - 1.5;
+      const starY = ly - 1.8;
+      const starX2 = rx + pupilShift - 1.5;
+      const starY2 = ry - 1.8;
+      const sLen = 1.2 + Math.sin(sparklePhase * 3) * 0.6;
+      ctx.strokeStyle = `rgba(255,255,255,${sp1 * 0.6})`;
+      ctx.lineWidth = 0.6;
+      // Left eye star
+      ctx.beginPath();
+      ctx.moveTo(starX - sLen, starY); ctx.lineTo(starX + sLen, starY);
+      ctx.moveTo(starX, starY - sLen); ctx.lineTo(starX, starY + sLen);
+      ctx.stroke();
+      // Right eye star
+      ctx.beginPath();
+      ctx.moveTo(starX2 - sLen, starY2); ctx.lineTo(starX2 + sLen, starY2);
+      ctx.moveTo(starX2, starY2 - sLen); ctx.lineTo(starX2, starY2 + sLen);
+      ctx.stroke();
+    }
+
+    // Cute mouth
+    if (player.vy < -4) {
+      // Surprised mouth when jumping high
+      ctx.beginPath();
+      ctx.ellipse(1 + eyeDir * 0.3, eyeY + 12, 3, 4, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#1a2a55';
+      ctx.fill();
+    } else if (Math.abs(player.vx) > 3) {
+      // Open smile when running
+      ctx.beginPath();
+      ctx.arc(1 + eyeDir * 0.3, eyeY + 10, 4, 0, Math.PI);
+      ctx.fillStyle = '#1a2a55';
+      ctx.fill();
+    } else {
+      // Gentle smile
+      ctx.beginPath();
+      ctx.arc(1, eyeY + 9, 3.5, 0.1, Math.PI - 0.1, false);
+      ctx.strokeStyle = '#1a2a55';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  // Particles
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  });
+  ctx.globalAlpha = 1;
+
+  ctx.restore();
+
+  // HUD
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, 0, canvas.width, 45);
+
+  ctx.font = '16px "Apple SD Gothic Neo", sans-serif';
+  ctx.fillStyle = '#aaccff';
+  ctx.textAlign = 'left';
+  ctx.fillText(`Stage: ${currentStage + 1} / ${stages.length}`, 20, 28);
+
+  ctx.fillStyle = '#ff8888';
+  ctx.fillText(`Deaths: ${deathCount}`, 220, 28);
+
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const min = Math.floor(elapsed / 60);
+  const sec = elapsed % 60;
+  ctx.fillStyle = '#88ffaa';
+  ctx.fillText(`Time: ${min}:${sec.toString().padStart(2, '0')}`, 400, 28);
+
+  ctx.fillStyle = '#888';
+  ctx.textAlign = 'right';
+  ctx.fillText('← → 이동 | Space 점프 | R 리스폰', canvas.width - 20, 28);
+
+  // Stage message
+  if (messageTimer > 0) {
+    ctx.globalAlpha = Math.min(1, messageTimer / 30);
+    ctx.font = 'bold 32px "Apple SD Gothic Neo", sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.fillText(showMessage, canvas.width / 2, canvas.height / 2 - 100);
+    ctx.globalAlpha = 1;
+  }
+
+  // Win screen
+  if (gameWon) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 60px "Apple SD Gothic Neo", sans-serif';
+    ctx.fillStyle = '#ffdd00';
+    ctx.fillText('클리어!', canvas.width / 2, canvas.height / 2 - 60);
+
+    ctx.font = '28px "Apple SD Gothic Neo", sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`사망 횟수: ${deathCount}`, canvas.width / 2, canvas.height / 2 + 10);
+    ctx.fillText(`클리어 시간: ${min}분 ${sec}초`, canvas.width / 2, canvas.height / 2 + 50);
+
+    ctx.font = '20px "Apple SD Gothic Neo", sans-serif';
+    ctx.fillStyle = '#aaaaaa';
+    ctx.fillText('R키를 눌러 다시 시작', canvas.width / 2, canvas.height / 2 + 100);
+
+    // Continuous win particles
+    if (Math.random() < 0.3) {
+      spawnParticles(
+        camera.x + Math.random() * canvas.width,
+        camera.y + Math.random() * canvas.height,
+        ['#ffdd00', '#ff44ff', '#44ffff', '#ff4444'][Math.floor(Math.random() * 4)],
+        3
+      );
+    }
+  }
+
+  // Progress bar
+  const totalWidth = stages[stages.length - 1].endX;
+  const progress = Math.min(1, player.x / totalWidth);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(canvas.width / 2 - 200, canvas.height - 20, 400, 8);
+  const barGrad = ctx.createLinearGradient(canvas.width / 2 - 200, 0, canvas.width / 2 + 200, 0);
+  barGrad.addColorStop(0, '#4488ff');
+  barGrad.addColorStop(1, '#44ff88');
+  ctx.fillStyle = barGrad;
+  ctx.fillRect(canvas.width / 2 - 200, canvas.height - 20, 400 * progress, 8);
+}
+
+// R key restart when won
+window.addEventListener('keydown', e => {
+  if (e.code === 'KeyR' && gameWon) {
+    gameWon = false;
+    stages = buildStages();
+    player.x = 50; player.y = 0;
+    player.vx = 0; player.vy = 0;
+    player.spawnX = 50; player.spawnY = 0;
+    player.trail = [];
+    deathCount = 0;
+    startTime = Date.now();
+    lastStage = -1;
+    particles = [];
+  }
+});
+
+// Set initial spawn
+player.spawnX = 50;
+player.spawnY = 550;
+player.y = 500;
+showStageMessage(stages[0].label);
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+</script>
+</body>
+</html>
