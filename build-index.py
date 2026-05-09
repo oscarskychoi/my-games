@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -73,7 +74,7 @@ def extract_meta(folder: Path, index: Path) -> dict:
         title = folder.name
 
     return {
-        "slug": folder.name,
+        "slug": unicodedata.normalize("NFC", folder.name),
         "title": title,
         "description": description or "",
     }
